@@ -15,6 +15,9 @@ env/
 data/
 models/
 
+# Generated Results
+results/
+
 # OS/editor
 .DS_Store
 Thumbs.db
