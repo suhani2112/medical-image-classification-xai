@@ -11,3 +11,4 @@ numpy
 matplotlib
 scikit-learn
 gdown
+tensorflow==2.19.1
