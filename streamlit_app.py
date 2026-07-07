@@ -1,14 +1,16 @@
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+import os
+import time
+from datetime import datetime
 from io import BytesIO
 
-import os
-import time 
-from datetime import datetime
-
-import requests
+import cv2
+import gdown
+import numpy as np
 import streamlit as st
+import tensorflow as tf
 from PIL import Image
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 
 st.set_page_config(
@@ -19,17 +21,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp{
-    background-color:#0E1117;
-}
-
-section[data-testid="stSidebar"]{
-    background-color:#111827;
-}
-
-section[data-testid="stSidebar"] *{
-    color:white;
-}
+.stApp{background-color:#0E1117;}
+section[data-testid="stSidebar"]{background-color:#111827;}
+section[data-testid="stSidebar"] *{color:white;}
 
 div[data-testid="stMetric"]{
     background:#1E293B;
@@ -48,9 +42,7 @@ div[data-testid="stMetric"]{
     width:100%;
 }
 
-.stProgress > div > div > div > div{
-    background:#2563EB;
-}
+.stProgress > div > div > div > div{background:#2563EB;}
 
 .footer{
     text-align:center;
@@ -61,7 +53,104 @@ div[data-testid="stMetric"]{
 """, unsafe_allow_html=True)
 
 
-BACKEND_URL = "http://127.0.0.1:8000/predict"
+MODEL_URL = "https://drive.google.com/uc?id=1UBeJIDa_Rc8C4Eqra3c2jAScCNv484DU"
+MODEL_PATH = "chest_xray_cnn_model.keras"
+IMAGE_SIZE = (224, 224)
+LAST_CONV_LAYER_NAME = "conv2d_2"
+
+
+@st.cache_resource
+def load_trained_model():
+    if not os.path.exists(MODEL_PATH):
+        gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+
+    return tf.keras.models.load_model(MODEL_PATH)
+
+
+def preprocess_uploaded_image(image):
+    image_np = np.array(image.convert("RGB"))
+
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    resized = cv2.resize(gray, IMAGE_SIZE)
+    normalized = resized.astype(np.float32) / 255.0
+
+    input_image = normalized.reshape(1, 224, 224, 1)
+
+    return image_np, input_image
+
+
+def generate_gradcam_overlay(model, original_image, input_image):
+    last_conv_layer = model.get_layer(LAST_CONV_LAYER_NAME)
+
+    conv_model = tf.keras.models.Model(
+        inputs=model.inputs,
+        outputs=last_conv_layer.output
+    )
+
+    classifier_input = tf.keras.Input(shape=last_conv_layer.output.shape[1:])
+
+    x = classifier_input
+    start = False
+
+    for layer in model.layers:
+        if layer.name == LAST_CONV_LAYER_NAME:
+            start = True
+            continue
+
+        if start:
+            x = layer(x)
+
+    classifier_model = tf.keras.models.Model(classifier_input, x)
+
+    input_tensor = tf.convert_to_tensor(input_image, dtype=tf.float32)
+
+    with tf.GradientTape() as tape:
+        conv_outputs = conv_model(input_tensor)
+        tape.watch(conv_outputs)
+        predictions = classifier_model(conv_outputs)
+        loss = predictions[:, 0]
+
+    gradients = tape.gradient(loss, conv_outputs)
+    pooled_gradients = tf.reduce_mean(gradients, axis=(0, 1, 2))
+
+    conv_outputs = conv_outputs[0]
+
+    heatmap = conv_outputs @ pooled_gradients[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+    heatmap = tf.maximum(heatmap, 0)
+
+    max_value = tf.reduce_max(heatmap)
+
+    if max_value != 0:
+        heatmap = heatmap / max_value
+
+    heatmap = heatmap.numpy()
+    heatmap = cv2.resize(heatmap, IMAGE_SIZE)
+
+    heatmap_uint8 = np.uint8(255 * heatmap)
+
+    colored_heatmap = cv2.applyColorMap(
+        heatmap_uint8,
+        cv2.COLORMAP_JET
+    )
+
+    colored_heatmap = cv2.cvtColor(
+        colored_heatmap,
+        cv2.COLOR_BGR2RGB
+    )
+
+    original_resized = cv2.resize(original_image, IMAGE_SIZE)
+
+    overlay = cv2.addWeighted(
+        original_resized,
+        0.6,
+        colored_heatmap,
+        0.4,
+        0
+    )
+
+    return overlay, predictions
+
 
 def generate_pdf_report(prediction, confidence, raw_probability, gradcam_path):
     buffer = BytesIO()
@@ -109,8 +198,8 @@ def generate_pdf_report(prediction, confidence, raw_probability, gradcam_path):
     )
 
     pdf.save()
-
     buffer.seek(0)
+
     return buffer
 
 
@@ -133,8 +222,9 @@ with st.sidebar:
     st.write("**Validation Accuracy:** 94%")
     st.write("**Classes:** Normal / Pneumonia")
     st.write("**Explainability:** Grad-CAM")
-    st.write("**Backend:** FastAPI")
+    st.write("**Inference:** TensorFlow")
     st.write("**Frontend:** Streamlit")
+    st.write("**Backend Code:** FastAPI included in repository")
     st.write("**Author:** Suhani Gupta")
     st.warning("Educational project only. Not for real medical diagnosis.")
 
@@ -147,9 +237,10 @@ Chest X-ray Pneumonia Dataset
 
 Frameworks:
 TensorFlow
-FastAPI
 Streamlit
 OpenCV
+Grad-CAM
+ReportLab
 """)
 
 
@@ -177,33 +268,37 @@ with left_col:
         use_container_width=True
     )
 
-start_time = time.time()
+
 with st.spinner("🧠 Running CNN inference and generating Grad-CAM..."):
-    files = {
-        "file": (
-            uploaded_file.name,
-            uploaded_file.getvalue(),
-            uploaded_file.type
-        )
-    }
+    model = load_trained_model()
 
-    response = requests.post(BACKEND_URL, files=files)
-    end_time = time.time()
-    processing_time = end_time - start_time
+    start_time = time.time()
 
+    original_image, input_image = preprocess_uploaded_image(image)
 
-if response.status_code != 200:
-    st.error("Prediction failed")
-    st.write(response.text)
-    st.stop()
+    overlay_image, predictions = generate_gradcam_overlay(
+        model,
+        original_image,
+        input_image
+    )
+
+    processing_time = time.time() - start_time
 
 
-result = response.json()
+raw_probability = float(predictions.numpy()[0][0])
 
-prediction = result["prediction"]
-confidence = result["confidence"]
-raw_probability = result["raw_probability"]
-gradcam_path = result["gradcam_path"]
+if raw_probability > 0.5:
+    prediction = "Pneumonia"
+    confidence = raw_probability * 100
+else:
+    prediction = "Normal"
+    confidence = (1 - raw_probability) * 100
+
+confidence = round(confidence, 2)
+raw_probability = round(raw_probability, 4)
+
+gradcam_path = "gradcam_overlay.jpg"
+Image.fromarray(overlay_image).save(gradcam_path)
 
 
 with right_col:
@@ -245,9 +340,9 @@ with right_col:
     st.progress(confidence / 100)
 
     st.metric(
-    "Processing Time",
-    f"{processing_time:.2f} sec"
-)
+        "Processing Time",
+        f"{processing_time:.2f} sec"
+    )
 
     st.caption(
         f"The model is **{confidence:.2f}% confident** that this image belongs to the **{prediction}** class."
@@ -268,23 +363,6 @@ if os.path.exists(gradcam_path):
         caption="Grad-CAM Overlay: highlighted regions influenced the prediction",
         use_container_width=True
     )
-
-    report_text = f"""
-AI Chest X-ray Diagnosis Report
-
-Prediction: {prediction}
-Confidence: {confidence}%
-Raw Pneumonia Probability: {raw_probability}
-
-Generated At: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-Project:
-AI Chest X-ray Diagnosis System using CNN and Grad-CAM
-
-Disclaimer:
-This report is generated by an AI model for educational/project purposes only.
-It should not be used as a substitute for professional medical diagnosis.
-"""
 
     col_a, col_b = st.columns(2)
 
@@ -323,12 +401,12 @@ st.markdown("""
 1. The uploaded X-ray is preprocessed using OpenCV.
 2. A CNN predicts whether the image is Normal or Pneumonia.
 3. Grad-CAM highlights the regions that influenced the prediction.
-4. FastAPI handles prediction, and Streamlit displays the result.
+4. TensorFlow performs inference and Streamlit displays the result.
 """)
 
 st.markdown("""
 <div class="footer">
-Built with TensorFlow • OpenCV • FastAPI • Streamlit • Grad-CAM<br>
+Built with TensorFlow • OpenCV • Streamlit • Grad-CAM • ReportLab<br>
 © 2026 Suhani Gupta
 </div>
 """, unsafe_allow_html=True)
