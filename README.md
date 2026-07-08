@@ -1,6 +1,9 @@
 # 🩺 AI Chest X-ray Diagnosis System with Explainable AI (Grad-CAM)
+# ## 🌐 Live Demo
 
-An end-to-end Deep Learning application for automated pneumonia detection from Chest X-ray images using a Custom Convolutional Neural Network (CNN). The application provides explainable predictions using Grad-CAM visualizations and offers an interactive Streamlit interface powered by a FastAPI backend.
+[Click here to try the app] https://medical-image-classification-xai-d8sgfdneksjgkf3dbx9mqi.streamlit.app/
+
+An end-to-end Deep Learning application for automated pneumonia detection from Chest X-ray images using a Custom Convolutional Neural Network (CNN). The application provides explainable predictions using Grad-CAM visualizations and offers an interactive Streamlit interface with direct TensorFlow model inference. FastAPI backend code is also included for API-based deployment.
 
 ---
 
@@ -50,25 +53,25 @@ An end-to-end Deep Learning application for automated pneumonia detection from C
 
 ### Home Screen
 
-> *(Add screenshot here later)*
+![Home](screenshots/home.png)
 
 ---
 
 ### Prediction Result
 
-> *(Add screenshot here later)*
+![Prediction](screenshots/prediction.png)
 
 ---
 
 ### Grad-CAM Visualization
 
-> *(Add screenshot here later)*
+![GradCAM](screenshots/gradcam.png)
 
 ---
 
 ### Generated PDF Report
 
-> *(Add screenshot here later)*
+![PDF](screenshots/pdf_report.png)
 
 ---
 
@@ -128,7 +131,6 @@ medical-image-classification-xai/
 
 - Pillow
 - ReportLab
-- Requests
 
 ---
 

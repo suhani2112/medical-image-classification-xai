@@ -35,7 +35,7 @@ def preprocess_image(image):
         IMAGE_SIZE
     )
 
-    normalized_image = resized_image / 255.0
+    normalized_image = resized_image.astype(np.float32) / 255.0
 
     input_image = normalized_image.reshape(
         1,

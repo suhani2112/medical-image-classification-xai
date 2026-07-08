@@ -276,16 +276,18 @@ with st.spinner("🧠 Running CNN inference and generating Grad-CAM..."):
 
     original_image, input_image = preprocess_uploaded_image(image)
 
-    overlay_image, predictions = generate_gradcam_overlay(
-        model,
-        original_image,
-        input_image
-    )
+    overlay_image, _ = generate_gradcam_overlay(
+    model,
+    original_image,
+    input_image
+)
+
+    predictions = model.predict(input_image, verbose=0)
+    raw_probability = float(predictions[0][0])
 
     processing_time = time.time() - start_time
 
 
-raw_probability = float(predictions.numpy()[0][0])
 
 if raw_probability > 0.5:
     prediction = "Pneumonia"
